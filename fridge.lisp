@@ -31,6 +31,16 @@ If no objects in the database match the initargs, the empty list is returned."))
 (defgeneric db= (a &rest args)
   (:documentation "Wether or not the objects have the same state in the database.  It assumes that the objects have been loaded from the database and will not reload them.  This effectively allows you to test if an object would receive another state in the database."))
 
+(defgeneric db-backed-slot-p (class slot)
+  (:documentation "Returns true iff this slot is backed by the database"))
+(defgeneric db-backed-slot-names (class)
+  (:documentation "Returns the names of the slots that are backed by the database, for the given class"))
+(defgeneric db-backed-slots (class)
+  (:documentation "Returns the slots that are backed by a database, for the given class"))
+(defgeneric slot-name (slot)
+  (:documentation "Returns the name of the given slot"))
+(defgeneric find-slot-by-column (class column-name)
+  (:documentation "Finds the slot that is related to the given column name for the given class"))
 (defgeneric find-slot-name-by-column (class column-name)
   (:documentation "Finds the slot name that is related to the given column name for the given class"))
 (defgeneric find-column-by-initarg (class initarg)
@@ -45,22 +55,14 @@ If no objects in the database match the initargs, the empty list is returned."))
   (:documentation "A plist of the columns and their values within the object, which represents the state the object currently has with respect to the database."))
 (defgeneric object-current-database-state (object)
   (:documentation " A plist of the colemns and their values within the object, which represents the last known state the object had in the database.  This is the state it had its last load or save."))
+(defgeneric and-query-from-initargs (class &rest initargs)
+  (:documentation "Returns an s-sql and-query that represents the way the initargs would be interpreted in the database"))
+(defgeneric set-slots-from-column-alist (class object &rest column-alist)
+  (:documentation "Sets the slot-values from the given column alist. After setting the slots, the snapshot is set to the current values in the object."))
 
-
-(defclass column-slot-connection ()
-  ((slot-name :accessor slot-name
-	      :initarg :slot-name
-	      :documentation "The name of the slot in the class")
-   (column-name :accessor column-name
-		:initarg :column-name
-		:documentation "The name of the slot in the database"))
-  (:documentation "Contains the needed information to connect a database column to a slot. Does not contain the database table name."))
 
 (defclass db-support-metaclass (standard-class)
-  ((database-slots :initform nil
-		   :initarg :database-slots
-		   :accessor database-slots)
-   (database-table :initarg :database-table
+  ((database-table :initarg :database-table
 		   :accessor database-table))
   (:documentation "This is the most basic form of a class that has access to the database.  There are a range of slots that have a database backing. The slots must be specified manually and can be set/retrieved through save and load.
 
@@ -73,62 +75,56 @@ eg: (defclass user ()
               :accessor email))
       (:table :users)
       (:metaclass db-support-metaclass))"))
+(defmethod shared-initialize :after ((dsm db-support-metaclass) slot-names &rest args &key table &allow-other-keys)
+  (declare (ignore slot-names args))
+  (setf (database-table dsm) (first table)))
 
-(flet ((set-args (db-support-class &rest args &key table direct-slots &allow-other-keys)
-	 (declare (ignore args))
-	 (when table
-	   (setf (database-table db-support-class) (first table)))
-	 (setf (database-slots db-support-class)
-	       (loop for slot-definition in direct-slots
-		  as column = (getf slot-definition :column)
-		  when column 
-		  collect (make-instance 'column-slot-connection 
-					 :slot-name (getf slot-definition :name)
-					 :column-name column)))))
-  (defmethod initialize-instance :after ((dbm db-support-metaclass) &rest args &key &allow-other-keys)
-    (apply #'set-args dbm args))
-  (defmethod reinitialize-instance :after ((dbm db-support-metaclass) &rest args &key &allow-other-keys)
-    (apply #'set-args dbm args)))
+(defclass column-direct-slot (standard-direct-slot-definition)
+  ((column :initarg :column
+	   :accessor column))
+  (:documentation "A direct slot that is linked to the column in the object's table"))
 
-
-;;;; BEGIN relaxing the rules on what may be defined in defclass
 (defmethod closer-mop:validate-superclass ((a db-support-metaclass) (b standard-class))
   T)
 
-(defclass db-support-effective-slot (standard-effective-slot-definition) ())
-(defclass db-support-direct-slot (standard-direct-slot-definition) ())
-
-(defmethod effective-slot-definition-class ((class db-support-metaclass) &rest args)
-  (declare (ignore args))
-  (find-class 'db-support-effective-slot))
-(defmethod direct-slot-definition-class ((class db-support-metaclass) &rest args)
-  (declare (ignore args))
-  (find-class 'db-support-direct-slot))
-
-(defmacro method-allow-other-keys (name &rest args)
-  `(defmethod ,name :before (,@args &rest args &key &allow-other-keys)
-     (declare (ignore args))))
-(method-allow-other-keys initialize-instance (class db-support-metaclass))
-(method-allow-other-keys make-instance (slot db-support-effective-slot))
-(method-allow-other-keys make-instance (slot db-support-direct-slot))
-(method-allow-other-keys make-instance (class db-support-metaclass))
-(method-allow-other-keys initialize-instance (slot db-support-effective-slot))
-(method-allow-other-keys initialize-instance (slot db-support-direct-slot))
-
-;;;; END relaxing the rules on what may be defined in defclass
-
 (defclass db-support-class (versioned-object)
-  () 
-  (:metaclass db-support-metaclass)
-  (:documentation "It is best to make this the superclass of your db-support-metaclass metaclassed classes."))
+  ()
+  (:documentation "The superclass for all classes that have the db-support-metaclass")
+  (:metaclass db-support-metaclass))
+
+(defmethod shared-initialize :after ((cds column-direct-slot) slot-names &rest args &key column &allow-other-keys)
+  (declare (ignore slot-names args))
+  (setf (column cds) column))
+
+(defmethod direct-slot-definition-class :around ((class db-support-metaclass) &key column &allow-other-keys)
+  (if column
+      (find-class 'column-direct-slot)
+      (call-next-method)))
+
+(defmethod db-backed-slot-p (class slot)
+  (declare (ignore class slot))
+  nil)
+(defmethod db-backed-slot-p (class (slot column-direct-slot))
+  (declare (ignore class))
+  T)
+
+(defmethod slot-name (slot)
+  (slot-value slot 'sb-pcl::name))
+(defmethod db-backed-slots ((class standard-class))
+  (remove-if-not (lambda (slot) (db-backed-slot-p class slot))
+		 (closer-mop:class-direct-slots class)))
+(defmethod db-backed-slot-names ((class standard-class))
+  (map 'list #'slot-name (db-backed-slots class)))
 
 (defmethod db= ((object db-support-class) &rest args)
-  (loop for a in (cons object args)
-     for b in args
-     when (not (equalp (object-updated-database-state a)
-		       (object-updated-database-state b)))
-     do (return-from db= nil))
-  T)
+  (if args
+      (and (not (find-if-not 
+		 (lambda (slot-name)
+		   (equalp (slot-value object slot-name)
+			   (slot-value (first args) slot-name)))
+		 (db-backed-slot-names (class-of object))))
+	   (apply #'db= args))
+      T))
 
 (defmethod object-in-database-p ((object db-support-class))
   (snapshot-p object +db-snapshot+))
@@ -138,31 +134,28 @@ eg: (defclass user ()
        (not (changed-p object +db-snapshot+))))
 
 (defmethod object-updated-database-state ((object db-support-class))
-  (loop for connection in (database-slots (class-of object))
-     append (list (column-name connection)
-		  (slot-value object (slot-name connection)))))
+   (loop for slot in (db-backed-slots (class-of object))
+      append (list (column slot)
+		   (slot-value object (slot-name slot)))))
 (defmethod object-current-database-state ((object db-support-class))
   (when (object-in-database-p object) 
-    (loop for connection in (database-slots (class-of object))
-       append (list (column-name connection)
-		    (snapshot-value object +db-snapshot+ (slot-name connection))))))
+    (loop for slot in (db-backed-slots (class-of object))
+       append (list (column slot)
+		    (snapshot-value object +db-snapshot+ (slot-name slot))))))
 
 (defmethod find-slot-by-initarg ((class standard-class) (initarg symbol))
   (flet ((slot-has-initarg-p (slot initarg)
 	   (find initarg (slot-value slot 'sb-pcl::initargs))))
     (find-if (lambda (slot) (slot-has-initarg-p slot initarg))
-	     (slot-value class 'sb-pcl::direct-slots))))
+	     (class-direct-slots class))))
 
 (defmethod find-column-by-initarg ((class db-support-metaclass) (initarg symbol))
-  (let ((slot (find-slot-by-initarg class initarg)))
-    (column-name (find-if (lambda (database-slot)
-			       (eql (slot-name database-slot) (slot-value slot 'sb-pcl::name)))
-			     (database-slots class)))))
+  (column (find-slot-by-initarg class initarg)))
 
+(defmethod find-slot-by-column ((class db-support-metaclass) (column symbol))
+  (find column (db-backed-slots class) :key #'column))
 (defmethod find-slot-name-by-column ((class db-support-metaclass) (column symbol))
-  (slot-name (find column
-		   (database-slots class)
-		   :key #'column-name)))
+  (slot-name (find-slot-by-column class column)))
 
 (define-condition record-not-found-error (error)
   ((db-table :initarg :table :reader db-table)
@@ -174,11 +167,10 @@ eg: (defclass user ()
   (let ((query-result (query (sql-compile query) :alists)))
     (restart-case (unless query-result
 		    (error 'record-not-found-error :query query))
-      (provide-alist (alist) (return-from get-query-alist alist))
+       (provide-alist (alist) (return-from get-query-alist alist))
       (retry () (get-query-alist query)))
     query-result))
-(defgeneric and-query-from-initargs (class &rest initargs)
-  (:documentation "Returns an s-sql and-query that represents the way the initargs would be interpreted in the database"))
+
 (defmethod and-query-from-initargs ((class symbol) &rest initargs)
   (apply #'and-query-from-initargs (find-class class) initargs))
 (defmethod and-query-from-initargs ((class db-support-metaclass) &rest initargs)
@@ -187,13 +179,13 @@ eg: (defclass user ()
     (cons :and
 	  (loop for initcol on initcolumns by #'cddr collect
 	       (list := (first initcol) (second initcol))))))
-(defgeneric set-slots-from-column-alist (class object &rest column-alist)
-  (:documentation "Sets the slot-values from the given column alist. After setting the slots, the snapshot is set to the current values in the object."))
+
 (defmethod set-slots-from-column-alist ((class db-support-metaclass) (object db-support-class) &rest column-alist)
   (loop for (column-name . value) in column-alist
      do (setf (slot-value object (find-slot-name-by-column (class-of object) column-name)) value))
   (snapshot object +db-snapshot+)
   object)
+
 (defmethod load-instance ((class symbol) &rest initargs)
   (apply #'load-instance (find-class class) initargs))
 (defmethod load-instance ((class db-support-metaclass) &rest initargs)
