@@ -5,8 +5,8 @@
 	   :save
 	   :delete-instance
 	   :db=
+	   :quickstore-again
 
-	   :record-not-found-error
 	   :inconsistent-database-error))
 
 (defpackage :fridge-user
@@ -20,10 +20,14 @@
 (defgeneric load-instance (class &key &allow-other-keys)
   (:documentation "Loads an object, its superclasses and its subclasses from the database.
 The order in which the objects are loaded is unspecified."))
+(defgeneric reload-instance (object)
+  (:documentation "Reloads the instance from the database.  This can help in setting the ids of certain objects"))
 (defgeneric load-instances (class &key &allow-other-keys)
   (:documentation "Loads a series of objects matching the given initargs, their superclasses and their subclasses from the database.
 The order in which the objects are loaded internally and externally, is unspecified.
 If no objects in the database match the initargs, the empty list is returned."))
+(defgeneric load-instance-by-slot-names (class &rest initargs)
+  (:documentation "Loads the first instance that matches the given slot names"))
 (defgeneric save (object)
   (:documentation "Updates the correct row(s) in the database, so it represents the values that are currently set."))
 (defgeneric delete-instance (object)
@@ -41,6 +45,8 @@ If no objects in the database match the initargs, the empty list is returned."))
   (:documentation "Returns the name of the given slot"))
 (defgeneric find-slot-by-column (class column-name)
   (:documentation "Finds the slot that is related to the given column name for the given class"))
+(defgeneric find-column-by-slot (class slot-name)
+  (:documentation "Finds the column that is related to the given slot name for the given class"))
 (defgeneric find-slot-name-by-column (class column-name)
   (:documentation "Finds the slot name that is related to the given column name for the given class"))
 (defgeneric find-column-by-initarg (class initarg)
@@ -59,6 +65,10 @@ If no objects in the database match the initargs, the empty list is returned."))
   (:documentation "Returns an s-sql and-query that represents the way the initargs would be interpreted in the database"))
 (defgeneric set-slots-from-column-alist (class object &rest column-alist)
   (:documentation "Sets the slot-values from the given column alist. After setting the slots, the snapshot is set to the current values in the object."))
+(defgeneric load-instance-from-column-alist (class &rest column-alist)
+  (:documentation "Creates a new instance and sets the values from the column alist as its standard values."))
+(defgeneric and-query-from-initslots (class &rest initslots)
+  (:documentation "Creates an and-query from the slots and the values they should have"))
 
 
 (defclass db-support-metaclass (standard-class)
@@ -83,6 +93,10 @@ eg: (defclass user ()
   ((column :initarg :column
 	   :accessor column))
   (:documentation "A direct slot that is linked to the column in the object's table"))
+(defclass direct-effective-slot (standard-effective-slot-definition)
+  ((direct-slot :initarg :direct-slot
+		:accessor direct-slot))
+  (:documentation "An effective slot that contains its linked direct slot"))
 
 (defmethod closer-mop:validate-superclass ((a db-support-metaclass) (b standard-class))
   T)
@@ -100,6 +114,27 @@ eg: (defclass user ()
   (if column
       (find-class 'column-direct-slot)
       (call-next-method)))
+
+;; begin effective-slot-definition-hacks
+(defparameter *direct-slots* nil "Postmodern trick to send the direct slots to the effective-slot-definition-class method")
+(defgeneric initialize-extra-info (slot args)
+  (:documentation "Initializes the extra information that an effective slot could get from the direct slots"))
+(defmethod initialize-extra-info ((slot direct-effective-slot) args)
+  (setf (direct-slot slot) (first args))
+  slot)
+(defmethod initialize-extra-info (a b)
+  (declare (ignore b))
+  a)
+(defmethod compute-effective-slot-definition :around ((class db-support-metaclass) name args)
+  (let ((*direct-slots* args))
+    (initialize-extra-info (call-next-method) args)))
+(defmethod effective-slot-definition-class :around ((class db-support-metaclass) &rest args)
+  (declare (ignore args))
+  (cond ((find (find-class 'column-direct-slot) *direct-slots* :key #'class-of)
+	 (find-class 'direct-effective-slot))
+	(T
+	 (call-next-method))))
+;; end effective-slot-definition-hacks
 
 (defmethod db-backed-slot-p (class slot)
   (declare (ignore class slot))
@@ -134,12 +169,14 @@ eg: (defclass user ()
        (not (changed-p object +db-snapshot+))))
 
 (defmethod object-updated-database-state ((object db-support-class))
-   (loop for slot in (db-backed-slots (class-of object))
-      append (list (column slot)
-		   (slot-value object (slot-name slot)))))
+  (loop for slot in (db-backed-slots (class-of object))
+     when (slot-boundp object (slot-name slot))
+     append (list (column slot)
+		  (slot-value object (slot-name slot)))))
 (defmethod object-current-database-state ((object db-support-class))
   (when (object-in-database-p object) 
     (loop for slot in (db-backed-slots (class-of object))
+       when (slot-boundp object (slot-name slot))
        append (list (column slot)
 		    (snapshot-value object +db-snapshot+ (slot-name slot))))))
 
@@ -148,6 +185,9 @@ eg: (defclass user ()
 	   (find initarg (slot-value slot 'sb-pcl::initargs))))
     (find-if (lambda (slot) (slot-has-initarg-p slot initarg))
 	     (class-direct-slots class))))
+
+(defmethod find-column-by-slot ((class db-support-metaclass) (slot-name symbol))
+  (column (find slot-name (db-backed-slots class) :key #'slot-name)))
 
 (defmethod find-column-by-initarg ((class db-support-metaclass) (initarg symbol))
   (column (find-slot-by-initarg class initarg)))
@@ -180,26 +220,53 @@ eg: (defclass user ()
 	  (loop for initcol on initcolumns by #'cddr collect
 	       (list := (first initcol) (second initcol))))))
 
+(defmethod and-query-from-initslots ((class symbol) &rest initslots)
+  (apply #'and-query-from-initslots (find-class class) initslots))
+(defmethod and-query-from-initslots ((class db-support-metaclass) &rest initargs)
+  (let ((initcolumns (loop for initarg on initargs by #'cddr append
+			  (list (find-column-by-slot class (first initarg))
+				(second initarg)))))
+    (cons :and
+	  (loop for initcol on initcolumns by #'cddr collect
+	       (list := (first initcol) (second initcol))))))
+
+
 (defmethod set-slots-from-column-alist ((class db-support-metaclass) (object db-support-class) &rest column-alist)
   (loop for (column-name . value) in column-alist
      do (setf (slot-value object (find-slot-name-by-column (class-of object) column-name)) value))
+  (setf (versioned-objects::versioned-variables object)
+	(loop for slot in (class-direct-slots class) when (db-backed-slot-p class slot) collect (slot-name slot)))
   (snapshot object +db-snapshot+)
   object)
 
+(defmethod load-instance-from-column-alist ((class symbol) &rest column-alist)
+  (apply #'load-instance-from-column-alist (find-class class) column-alist))
+(defmethod load-instance-from-column-alist ((class db-support-metaclass) &rest column-alist)
+  (apply #'set-slots-from-column-alist class (make-instance class) column-alist))
+
 (defmethod load-instance ((class symbol) &rest initargs)
-  (apply #'load-instance (find-class class) initargs))
+  (first (apply #'load-instances class initargs)))
 (defmethod load-instance ((class db-support-metaclass) &rest initargs)
-  (let* ((complete-query (list :select '* :from (database-table class) :where (apply #'and-query-from-initargs class initargs)))
-	 (object (apply #'make-instance class initargs)))
-    (apply #'set-slots-from-column-alist class object (first (get-query-alist complete-query)))))
+  (first (apply #'load-instances class initargs)))
 
 (defmethod load-instances ((class symbol) &rest initargs)
   (apply #'load-instances (find-class class) initargs))
 (defmethod load-instances ((class db-support-metaclass) &rest initargs)
   (let* ((complete-query (list :select '* :from (database-table class) :where (apply #'and-query-from-initargs class initargs))))
     (handler-case (loop for alist in (get-query-alist complete-query)
-		     collect (apply #'set-slots-from-column-alist class (apply #'make-instance class initargs) alist))
+		     collect (apply #'load-instance-from-column-alist class alist))
       (record-not-found-error () nil))))
+(defmethod load-instances-by-slot-names ((class symbol) &rest initargs)
+  (apply #'load-instances-by-slot-names (find-class class) initargs))
+(defmethod load-instances-by-slot-names ((class db-support-metaclass) &rest initargs)
+  (let* ((complete-query (list :select '* :from (database-table class) :where (apply #'and-query-from-initslots class initargs))))
+    (handler-case (loop for alist in (get-query-alist complete-query)
+		     collect (apply #'load-instance-from-column-alist class alist))
+      (record-not-found-error () nil))))
+(defmethod load-instance-by-slot-names ((class symbol) &rest initargs)
+  (first (apply #'load-instances-by-slot-names (find-class class) initargs)))
+(defmethod load-instance-by-slot-names ((class db-support-metaclass) &rest initargs)
+  (first (apply #'load-instances-by-slot-names class initargs)))
 
 (define-condition inconsistent-database-error (error)
   ((object :initarg :object :reader object)
@@ -207,35 +274,38 @@ eg: (defclass user ()
    (set :initarg :set :reader set-clause :initform nil))
   (:documentation "Error that will be thrown when an action can not be fulfilled due to a changed database schema."))
 
-(defmethod save ((object db-support-class))
-  (let ((set-clause (object-updated-database-state object)))
-    (unless (and (object-in-database-p object)
-		 (object-up-to-date-p object))
-      ;; we need to save our inner class
-      (flet ((update-database (object set &optional where)
-	       (restart-case
-		   (multiple-value-bind (something updated-rows)
-		       (if where
-			   (query (sql-compile `(:update ,(database-table (class-of object)) :set ,@set :where ,where)))
-			   (query (sql-compile `(:insert-into ,(database-table (class-of object)) :set ,@set))))
-		     (declare (ignore something))
-		     (unless (= 1 updated-rows)
-		       (error 'inconsistent-database-error :object object :where where :set set)))
-		 (pretend-database-model-has-been-updated () nil))))
-	(cond ((and (object-in-database-p object) (not (object-up-to-date-p object)))
-	       (let ((where-clause (cons :and 
-					 (loop for (column value) on (object-current-database-state object) by #'cddr
-					    collect (list := column value)))))
-		 (update-database object set-clause where-clause)))
-	      ((not (object-in-database-p object))
-	       (update-database object set-clause)))))
-    (snapshot object +db-snapshot+)
-    object))
+(defgeneric where-clause (object)
+  (:documentation "The where-clause that can be used to find the given object in the database"))
+(defmethod where-clause ((object db-support-class))
+  (cons :and 
+	(loop for (column value) on (object-current-database-state object) by #'cddr
+	   collect (list := column value))))
+(defgeneric set-clause (object)
+  (:documentation "The set-clause that can be used to set the values of the given object in the database"))
+(defmethod set-clause ((object db-support-class))
+  (object-updated-database-state object))
 
+(defmethod save ((object db-support-class))
+  (unless (and (object-in-database-p object)
+	       (object-up-to-date-p object))
+    ;; we need to save our inner class
+    (flet ((update-database (object set &optional where)
+	     (apply #'set-slots-from-column-alist
+		    (class-of object) object 
+		    (first
+		     (if where
+			 (query (sql-compile `(:update ,(database-table (class-of object)) :set ,@set :where ,where :returning '*)) :alists)
+			 (query (sql-compile `(:insert-into ,(database-table (class-of object)) :set ,@set :returning '*)) :alists))))))
+      (cond ((and (object-in-database-p object) (not (object-up-to-date-p object)))
+	     (update-database object (set-clause object) (where-clause object)))
+	    ((not (object-in-database-p object))
+	     (update-database object (set-clause object)))))
+    (snapshot object +db-snapshot+)))
+
+(defmethod delete-instance (ignored)
+  (declare (ignore ignored)) nil)
 (defmethod delete-instance ((object db-support-class))
-  (let* ((where-clause `(:and ,@(loop for (column value) on (object-current-database-state object) by #'cddr
-				   collect (list := column value))))
-	 (query `(:delete-from ,(database-table (class-of object)) :where ,where-clause)))
+  (let* ((query `(:delete-from ,(database-table (class-of object)) :where ,(where-clause object))))
     (multiple-value-bind (unimportant updated-rows)
 	(query (sql-compile query))
       (declare (ignore unimportant))
@@ -243,8 +313,13 @@ eg: (defclass user ()
 		      (unless (> updated-rows 0)
 			(error 'record-not-found-error
 			       :table (database-table (class-of object))
-			       :where where-clause
+			       :where (where-clause object)
 			       :query query))
 		      (rm-snapshot object +db-snapshot+))
 	(retry () (delete-instance object))
 	(continue () nil)))))
+
+(defmethod reload-instance ((object db-support-class))
+  (let ((class (class-of object)))
+    (set-slots-from-column-alist class object (query (sql-compile `(:select * :from ,(database-table class) :where ,(where-clause object))))))
+  object)

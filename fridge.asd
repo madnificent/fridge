@@ -11,4 +11,6 @@
     :description "Fridge is a connection from lisp to the database."
     :depends-on  (:closer-mop :postmodern :versioned-objects :fiveam :database-migrations)
     :components ((:file "fridge")
-		 (:file "fridge-tests")))
+		 (:file "fridge-stored" :depends-on ("fridge"))
+		 (:file "fridge-linked" :depends-on ("fridge-stored" "fridge"))
+		 (:file "fridge-tests" :depends-on ("fridge" "fridge-stored" "fridge-linked"))))
