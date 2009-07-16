@@ -198,7 +198,6 @@
 (defmethod slot-value-using-class ((class linkable-metaclass) object (slot master-effective-slot))
   (let ((slot (direct-slot slot)))
     (when (slot-boundp object (internal-slot slot))
-      (handler-case 
-	  (load-instance-from-slot (external-class slot) (id-slot-name (external-class slot)) (slot-value object (internal-slot slot)))
-	(record-not-found-error () nil)))))
+      (format T "~&Yo, I'm loading an ~A with the id-slot being ~A and the value of that biggy being ~A~%" (external-class slot) (id-slot-name (external-class slot)) (slot-value object (internal-slot slot)))
+      (load-instance-from-slot (external-class slot) (id-slot-name (external-class slot)) (slot-value object (internal-slot slot))))))
 
