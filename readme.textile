@@ -1,0 +1,94 @@
+h1. Fridge
+
+Fridge is a mapping between Common Lisp classes/objects and PostgreSQL.
+
+The idea behind Fridge, is that you can infer most relations from the database itself.  During the useage of the system, a small set of the database is replicated in the QuickStore of Fridge.  This quickstore allows you to easily access the objects without unecessary accessing of the database.  Although Fridge is far from complete, it is assumed to be useable.
+
+Fridge has been developed under SBCL and uses closer-mop.  It uses some minor things which may be SBCL-specific.
+
+h1. The basic howto
+
+This howto is not fully complete.  This library is expected to be extended with neccessary content as it is used more often.
+
+If you follow these simple conventions, the system will create a database-model which you can readily use.
+
+  "CREATE TABLE your_class_name ( id SERIAL PRIMARY KEY, first_variable text, second_variable text, linked_class_id INTEGER, other_linked_class_ids INTEGER );"
+  "CREATE TABLE linked_class ( id SERIAL PRIMARY KEY, some_number INTEGER );"
+  "CREATE TABLE other_linked_class ( id SERIAL PRIMARY KEY, some_string text );"
+
+in which the names of the classes must be written in that form (an underscore instead of a dash). and the names of the columns matter in the following way:
+
+* The id of the class is named with the slot id and is auto-generated (or you'll have to specify it each creation of a new object)
+* The slots that link to another class are named class_name_id if there is only one object referring to a certain id, or class_name_ids if there are multiple objects referring to that id.
+
+The objects can then be loaded by using the CLOS way of loading instances by specifying both their superclass and their metaclass:
+
+  (use-package :fridge)
+  (defclass your-class-name (dbi-class)
+    () ; no need to specify slots if you don't need anything besides the slots and links
+    (:package my-package:some-internal-symbol) ; you can use symbol to denote that all created slots should be part of the package, to which my-package:some-internal-symbol belongs.  If this is not specified, the package of your-class-name is used.  This is generally safe.
+    (:metaclass dbi-metaclass))
+  (defclass linked-class (dbi-class)
+    ()
+    (:metaclass dbi-metaclass))
+  (defclass other-linked-class (dbi-class)
+    ()
+    (:metaclass dbi-metaclass))
+
+So, which methods and slots have you gained by this?  Let's hop over each of the classes.
+
+h5. for each class
+
+Some support is shared through each of classes.
+
+* a slot for each column name, in its interned form.  Being the slots: (id first-variable second-variable linked-class-id other-linked-class-ids)
+* for each none-linked column, an accessor is created.  Being the accessors: (id first-variable second-variable)
+* for each none-linked column, the slot accepts initarg, resembling the name of the slot as a keyword argument.
+
+h5. your-class-name
+
+Objects of this class are dependent on the definitions given in linked-class and other-linked-class.  This is so because your-class-name links to those classes.  The given support is:
+
+* for each linked column, an accessor is created to get/set the linked object.  Being the accessors: (linked-class other-linked-class). Note that the -id part is removed
+
+h5. linked-class
+
+Linked class is supposed to have *one* element of your-class-name.  This is so because the linking column name ended in -id.
+
+* linked-class gets a slot with an accessor which returns or sets one object.  The accessor is named as the class-name it links to.  Being your-class-name in this example.
+
+h5. other-linked-class
+
+Other linked class is supposed to have multiple elements of your-class-name.  This is so because the linking column name ended in -ids.
+
+* other-linked-class gets a slot with an accessor which returns or sets a list of objects.  The accessor is named as the class-name it links to.  Being your-class-name in this example.
+
+h1. Saving and loading.
+
+Saving and loading happens through separate methods.
+
+h2. Loading
+
+You use (load-instance 'your-class-name :id your-id) to load one object from the database.  (load-instances 'your-class-name :first-variable 10) can be used to fetch the list of objects that have 10 as their first-variable value (eg: the value in the column first_variable).
+
+Only loaded-object is loaded in that case.  You con transparently refer to the objects in the database and link to them through the created accessors.
+
+h2. Saving
+
+When you use validations, objects will only store of teh requested section of objects their validation succeeds.
+
+You can use (save object) to store a single object.  This is the basic building block of saving.  As this method is fairly cumbersome to use, some helpers have been made to make your life easier:
+
+* save-quickstore : You use (save-quickstore) to save all elements in the quickstore (which contains all objects which you have loaded), this is roughly equivalent to all objects you accessed.
+* save-object-ring : ( *warning* this method is currently not supported ) You can use (save-object-ring object) which stores all objects a certain object links to, if you have modified only one object.  This ensures that you will not modify objects that are related to the given object but shouldn't have been touched (can be handy if you toyed around a bit too much).
+
+It is assumed that you will use save-quickstore most.  If the object hasn't been changed internally (but only has been fetched to inspect its values), the quickstore will not query the database to store that certain object.
+
+h1. Masters and obedients
+
+When you use the linking as specified above, there is a master and an obedient class at play.
+
+The obedient class has an extra slot, which links to the master's id.  In our previous example your-class-name was is the obedient class for both linked-class and other-linked-class.  This difference is used in a way to handle the storing and removal of objects.  When you disassign an object from a master class, that object will be removed from the database and it will be removed from the quickstore.  In order for the object to be saved (and updated) again when saving the quickstore, you must re-add it to the quickstore.  You can do this by calling (quickstore-again your-lost-object).  Or you can call save on it immediately.
+
+
+

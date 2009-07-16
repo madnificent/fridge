@@ -1,11 +1,11 @@
 (in-package :fridge)
 
-(defclass dbi-metaclass (linkable-metaclass)
+(defclass dbi-metaclass (linkable-metaclass validatable-class)
   ()
   (:documentation "This metaclass will infer most data from the database"))
 (defmethod validate-superclass ((a dbi-metaclass) (b standard-class))
   T)
-(defclass dbi-class (linkable-class)
+(defclass dbi-class (linkable-class validatable-object)
   ()
   (:metaclass dbi-metaclass)
   (:documentation "This class is supposed to be used with the dbi-metaclass"))
@@ -103,3 +103,11 @@
 	    (progn (format T "~&I've generated the following from the table:~%") (princ new-args T) (format T "~&You can extract the needed variables from there, if you'd need to tweak or debug~%"))
 	    (apply #'call-next-method dsm slot-names new-args)))
 	(call-next-method))))
+
+(defmethod save :around ((object dbi-class))
+  (when (valid-p object)
+    (call-next-method)))
+
+(defmethod can-save-object-in-list-p :around ((object dbi-class) (other-objects list))
+  (and (valid-p object)
+       (call-next-method)))

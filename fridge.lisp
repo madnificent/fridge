@@ -1,13 +1,13 @@
 (defpackage :fridge
-  (:use :common-lisp :postmodern :closer-mop :versioned-objects)
+  (:use :common-lisp :postmodern :closer-mop :versioned-objects :validations)
   (:export :load-instance
 	   :load-instances
-	   :save
+	   :save :save-objects :save-quickstore
 	   :delete-instance
 	   :db=
+	   :quickclear
 	   :quickstore-again
-
-	   :inconsistent-database-error))
+	   :dbi-class :dbi-metaclass))
 
 (defpackage :fridge-user
   (:use :common-lisp :fridge))
@@ -30,6 +30,10 @@ If no objects in the database match the initargs, the empty list is returned."))
   (:documentation "Loads the first instance that matches the given slot names"))
 (defgeneric save (object)
   (:documentation "Updates the correct row(s) in the database, so it represents the values that are currently set."))
+(defgeneric save-objects (objects)
+  (:documentation "Saves the objects in the list of objects"))
+(defgeneric can-save-object-in-list-p (object objects)
+  (:documentation "Checks if <object> can be saved when the list of other objects to be saved is <objects>.  Returns T when this is ok for <object>, nil otherwise."))
 (defgeneric delete-instance (object)
   (:documentation "Removes the rows from the database that represented this object."))
 (defgeneric db= (a &rest args)
@@ -323,3 +327,11 @@ eg: (defclass user ()
   (let ((class (class-of object)))
     (set-slots-from-column-alist class object (query (sql-compile `(:select * :from ,(database-table class) :where ,(where-clause object))))))
   object)
+
+(defmethod can-save-object-in-list-p ((object db-support-class) (objects list))
+  T)
+(defmethod save-objects ((objects list))
+  (let ((invalid-objects (loop for object in objects unless (can-save-object-in-list-p object objects) collect objects)))
+    (if invalid-objects
+	invalid-objects
+	(loop for object in objects do (save object)))))

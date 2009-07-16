@@ -8,6 +8,7 @@
   (:documentation "Builds a finder that can be used to fetch the object from the hash, if it is there"))
 (defgeneric quickstore (object &optional slot value)
   (:documentation "Stores the object in the quickstore"))
+
 (defgeneric quickfetch (identifier)
   (:documentation "Fetches the first object that matches the identifier from the quickstore"))
 (defgeneric quickfetch-all (identifier)
@@ -32,6 +33,11 @@
 
 (defparameter *known-objects* (make-hash-table :test 'equal)
   "Hash that will store the known objects by their class and id")
+
+(defun save-quickstore ()
+  "Saves all objects known to the quickstore to the database"
+  (save-objects (remove-duplicates (loop for object being the hash-value in *known-objects* collect object))))
+
 (defun quickclear ()
   "Clears the quickstore database"
   (setf *known-objects* (make-hash-table :test 'equal)))
@@ -202,4 +208,3 @@
   (let ((fetched (quickfetch-all (build-hash-identifier class slot value)))
 	(loaded (load-instances-by-slot-names class slot value)))
     (remove-duplicates (concatenate 'list fetched loaded) :key #'id)))
-

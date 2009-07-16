@@ -5,11 +5,11 @@
 (defsystem :fridge
     :name "Fridge"
     :author "Aad Versteden <madnificent@gmail.com>"
-    :version "0"
+    :version "0.1"
     :maintainer "Aad Versteden <madnificent@gmail.com>"
     :licence "MIT"
     :description "Fridge is a connection from lisp to the database."
-    :depends-on  (:closer-mop :postmodern :versioned-objects :fiveam :database-migrations :cl-ppcre)
+    :depends-on  (:closer-mop :postmodern :versioned-objects :fiveam :database-migrations :cl-ppcre :s-sql :validations)
     :components ((:file "fridge")
 		 (:file "fridge-stored" :depends-on ("fridge"))
 		 (:file "fridge-linked" :depends-on ("fridge-stored"))
