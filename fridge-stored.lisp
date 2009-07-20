@@ -36,7 +36,9 @@
 
 (defun save-quickstore ()
   "Saves all objects known to the quickstore to the database"
-  (save-objects (remove-duplicates (loop for object being the hash-value in *known-objects* collect object))))
+  (let ((objects-to-save (remove-duplicates (loop for object being the hash-value in *known-objects* collect (first object)))))
+    (save-objects objects-to-save)
+    objects-to-save))
 
 (defun quickclear ()
   "Clears the quickstore database"
@@ -81,11 +83,17 @@
 	 (find-class 'quicksearch-id-effective-slot))
 	(T
 	 (call-next-method))))
-(defmethod direct-slot-definition-class :around ((class quicksearch-support-metaclass) &key id &allow-other-keys)
-  (if id
+(defmethod direct-slot-definition-class :around ((class quicksearch-support-metaclass) &rest initargs &key arg &allow-other-keys)
+  (format T "~&Yo, I'm searching for the direct slot of ~A,~%from ~A" class initargs)
+  (if (find :id initargs)
       (find-class 'quicksearch-id-direct-slot)
       (call-next-method)))
 
+(defmethod slot-value-using-class :around ((class quicksearch-support-metaclass) (object quicksearch-support-class) (slot quicksearch-id-effective-slot))
+  (let ((slot-name (slot-name (direct-slot slot)))) 
+    (or (and (slot-boundp object slot-name) (call-next-method))
+       (progn (save object)
+	      (slot-value object slot-name)))))
 (defmethod (setf slot-value-using-class) :around (value (class quicksearch-support-metaclass) (object quicksearch-support-class) (slot quicksearch-id-effective-slot))
   (when (slot-boundp-using-class class object slot)
     (quickrm object))

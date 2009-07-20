@@ -191,7 +191,11 @@ eg: (defclass user ()
 	     (class-direct-slots class))))
 
 (defmethod find-column-by-slot ((class db-support-metaclass) (slot-name symbol))
-  (column (find slot-name (db-backed-slots class) :key #'slot-name)))
+  (let ((slot (find slot-name (db-backed-slots class) :key #'slot-name)))
+    (unless slot
+      (error "Could not find slot for ~A and ~A" class slot-name))
+    (when slot
+      (column slot))))
 
 (defmethod find-column-by-initarg ((class db-support-metaclass) (initarg symbol))
   (column (find-slot-by-initarg class initarg)))
@@ -220,9 +224,10 @@ eg: (defclass user ()
 (defmethod and-query-from-initargs ((class db-support-metaclass) &rest initargs)
   (let ((initcolumns (loop for initarg on initargs by #'cddr append
 			  (list (find-column-by-initarg class (first initarg)) (second initarg)))))
-    (cons :and
-	  (loop for initcol on initcolumns by #'cddr collect
-	       (list := (first initcol) (second initcol))))))
+    (when initcolumns
+      (cons :and
+	   (loop for initcol on initcolumns by #'cddr collect
+		(list := (first initcol) (second initcol)))))))
 
 (defmethod and-query-from-initslots ((class symbol) &rest initslots)
   (apply #'and-query-from-initslots (find-class class) initslots))
@@ -230,9 +235,10 @@ eg: (defclass user ()
   (let ((initcolumns (loop for initarg on initargs by #'cddr append
 			  (list (find-column-by-slot class (first initarg))
 				(second initarg)))))
-    (cons :and
-	  (loop for initcol on initcolumns by #'cddr collect
-	       (list := (first initcol) (second initcol))))))
+    (when initcolumns
+      (cons :and
+	   (loop for initcol on initcolumns by #'cddr collect
+		(list := (first initcol) (second initcol)))))))
 
 
 (defmethod set-slots-from-column-alist ((class db-support-metaclass) (object db-support-class) &rest column-alist)
@@ -256,14 +262,16 @@ eg: (defclass user ()
 (defmethod load-instances ((class symbol) &rest initargs)
   (apply #'load-instances (find-class class) initargs))
 (defmethod load-instances ((class db-support-metaclass) &rest initargs)
-  (let* ((complete-query (list :select '* :from (database-table class) :where (apply #'and-query-from-initargs class initargs))))
+  (let* ((where-clause (apply #'and-query-from-initargs class initargs))
+	 (complete-query `(:select '* :from ,(database-table class) ,@(when where-clause `(:where ,where-clause)))))
     (handler-case (loop for alist in (get-query-alist complete-query)
 		     collect (apply #'load-instance-from-column-alist class alist))
       (record-not-found-error () nil))))
 (defmethod load-instances-by-slot-names ((class symbol) &rest initargs)
   (apply #'load-instances-by-slot-names (find-class class) initargs))
 (defmethod load-instances-by-slot-names ((class db-support-metaclass) &rest initargs)
-  (let* ((complete-query (list :select '* :from (database-table class) :where (apply #'and-query-from-initslots class initargs))))
+  (let* ((where-clause (apply #'and-query-from-initslots class initargs))
+	 (complete-query `(:select '* :from ,(database-table class) ,@(when where-clause `(:where ,where-clause)))))
     (handler-case (loop for alist in (get-query-alist complete-query)
 		     collect (apply #'load-instance-from-column-alist class alist))
       (record-not-found-error () nil))))
@@ -328,10 +336,13 @@ eg: (defclass user ()
     (set-slots-from-column-alist class object (query (sql-compile `(:select * :from ,(database-table class) :where ,(where-clause object))))))
   object)
 
+(defmethod can-save-object-in-list-p (a b)
+  (declare (ignore a b))
+  T)
 (defmethod can-save-object-in-list-p ((object db-support-class) (objects list))
   T)
 (defmethod save-objects ((objects list))
-  (let ((invalid-objects (loop for object in objects unless (can-save-object-in-list-p object objects) collect objects)))
+  (let ((invalid-objects (loop for object in objects unless (can-save-object-in-list-p object objects) collect object)))
     (if invalid-objects
 	invalid-objects
 	(loop for object in objects do (save object)))))
