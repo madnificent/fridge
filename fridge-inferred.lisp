@@ -16,7 +16,7 @@
      (setf ,place (concatenate 'list ,place (list ,getter ,value)))))
 
 (defun complete-slot-definition (class-name column slot-definition direct-slots package)
-  (if (cl-ppcre:scan-to-strings "-ids?$" (s-sql:to-sql-name column))
+  (if (cl-ppcre:scan-to-strings "_ids?$" (s-sql:to-sql-name column))
       (let ((new-slot-definition slot-definition))
 	(unless (getf new-slot-definition :id)
 	  (setf new-slot-definition (concatenate 'list new-slot-definition (list :id T))))
@@ -25,7 +25,11 @@
   
 (defun build-accompanying-linked-slot (class-name slot-definition direct-slots package)
   (declare (ignore class-name))
-  (let* ((name (intern (format nil "~A" (s-sql:from-sql-name (first (cl-ppcre:scan-to-strings "^[^(-ids?)]*" (s-sql:to-sql-name (getf slot-definition :column)))))) package))
+  (let* ((name (intern (format nil "~A"
+			       (s-sql:from-sql-name (elt (second (multiple-value-list (cl-ppcre:scan-to-strings "(.*)_ids?"
+															 (s-sql:to-sql-name (getf slot-definition :column)))))
+							 0)))
+		       package))
 	 (accompanying-slot (or (find-if (lambda (direct-slot) (eql (getf direct-slot :internal-slot) (getf slot-definition :name)))
 					 direct-slots)
 				(list :name name))))
@@ -34,12 +38,13 @@
     (add-unless-existant accompanying-slot :readers (list name))
     (add-unless-existant accompanying-slot :writers (list (list 'setf name)))
     (add-unless-existant accompanying-slot :initargs (list (getf slot-definition :column)))
+    (add-unless-existant accompanying-slot :i-am-obediant-p T)
     accompanying-slot))
 				      
 (defun create-slot-definition (class-name column direct-slots package)
   (let* ((name (intern (format nil "~A" column) package)))
     (let ((statements (list :name name :column column)))
-      (if (cl-ppcre:scan "-ids?$" (s-sql:to-sql-name column))
+      (if (cl-ppcre:scan "_ids?$" (s-sql:to-sql-name column))
 	  (let ((current-slot-definition (concatenate 'list statements
 						      (list :id T))))
 	    (list current-slot-definition
@@ -100,7 +105,9 @@
 							      (list :direct-slots updated-slot-definitions))
 							     (T (list key value))))
 				       (list :table (list table)))))
-	    (progn (format T "~&I've generated the following from the table:~%") (princ new-args T) (format T "~&You can extract the needed variables from there, if you'd need to tweak or debug~%"))
+	    (progn (format T "~&I've generated the following from the table:~%")
+		   (princ new-args T)
+		   (format T "~&You can extract the needed variables from there, if you'd need to tweak or debug~%"))
 	    (apply #'call-next-method dsm slot-names new-args)))
 	(call-next-method))))
 

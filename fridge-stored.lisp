@@ -84,7 +84,6 @@
 	(T
 	 (call-next-method))))
 (defmethod direct-slot-definition-class :around ((class quicksearch-support-metaclass) &rest initargs &key arg &allow-other-keys)
-  (format T "~&Yo, I'm searching for the direct slot of ~A,~%from ~A" class initargs)
   (if (find :id initargs)
       (find-class 'quicksearch-id-direct-slot)
       (call-next-method)))
@@ -182,11 +181,8 @@
 
 (defmethod load-instance-from-column-alist :around ((class quicksearch-support-metaclass) &rest column-alist)
   (let ((column (find-column-by-slot class (id-slot-name class))))
-    (format T "~&column is ~A~%" column)
     (let ((fetched-value (when (find column column-alist :key #'car)
-			   (format T "~&column!, using ~A now~%" (build-hash-id class (assoc column column-alist)))
 			   (quickfetch (build-hash-id class (cdr (assoc column column-alist)))))))
-      (format T "~&fetched-value: ~A~%" fetched-value)
       (or fetched-value (call-next-method)))))
 
 (defmethod load-instances :around ((class quicksearch-support-metaclass) &rest initargs)
@@ -218,5 +214,4 @@
 (defmethod load-instances-from-slot ((class quicksearch-support-metaclass) slot value)
   (let ((fetched (quickfetch-all (build-hash-identifier class slot value)))
 	(loaded (load-instances-by-slot-names class slot value)))
-    (format T "~%fetched ~A~%loaded ~A~%" fetched loaded)
     (remove-duplicates (concatenate 'list fetched loaded) :key #'id)))
