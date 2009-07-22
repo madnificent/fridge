@@ -43,16 +43,22 @@
 				      
 (defun create-slot-definition (class-name column direct-slots package)
   (let* ((name (intern (format nil "~A" column) package)))
-    (let ((statements (list :name name :column column)))
-      (if (cl-ppcre:scan "_ids?$" (s-sql:to-sql-name column))
-	  (let ((current-slot-definition (concatenate 'list statements
-						      (list :id T))))
-	    (list current-slot-definition
-		  (build-accompanying-linked-slot class-name current-slot-definition direct-slots package)))
-	  (list (concatenate 'list statements
-			     (list :readers (list name)
-				   :writers (list (list 'setf name))
-				   :initargs (list column))))))))
+    (let ((statements (list :name name 
+			    :column column 
+			    :initargs (list column)
+			    :readers (list column)
+			    :writers (list (list 'setf column)))))
+      (let ((result
+	     (if (cl-ppcre:scan "_ids?$" (s-sql:to-sql-name column))
+		 (let ((current-slot-definition (concatenate 'list statements
+							     (list :id T))))
+		   (list current-slot-definition
+			 (build-accompanying-linked-slot class-name current-slot-definition direct-slots package)))
+		 (list (concatenate 'list statements
+				    (list :readers (list name)
+					  :writers (list (list 'setf name))
+					  :initargs (list column)))))))
+	result))))
 
 (defun build-linked-slot-description (table table-description name direct-slots package)
   (let ((my-single-link-name (concatenate 'string (s-sql:to-sql-name name) "_id"))

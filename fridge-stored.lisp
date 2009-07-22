@@ -49,9 +49,12 @@
   (:documentation "This metaclass allows you to do quick searches for objects and choose a failsafe method when they couldn't be found"))
 (defclass quicksearch-support-class (db-support-class)
   ((notifiers :initform nil
-	      :accessor notifiers))
+	      :writer (setf notifiers)))
   (:metaclass quicksearch-support-metaclass)
   (:documentation "This should be the superclass of the quicksearch-support-metaclass"))
+
+(defmethod notifiers ((object quicksearch-support-class))
+  (and (slot-boundp object 'notifiers) (slot-value object 'notifiers)))
 
 (defmethod closer-mop:validate-superclass ((a quicksearch-support-metaclass) (b standard-class))
   T)
