@@ -76,6 +76,9 @@
 (defmethod id-slot-name (class)
   (slot-name (id-slot class)))
 
+(defmethod id (object)
+  (declare (ignore object))
+  nil)
 (defmethod id ((object quicksearch-support-class))
   (slot-value object (id-slot-name object)))
 
@@ -87,6 +90,7 @@
 	(T
 	 (call-next-method))))
 (defmethod direct-slot-definition-class :around ((class quicksearch-support-metaclass) &rest initargs &key arg &allow-other-keys)
+  (declare (ignore arg))
   (if (find :id initargs)
       (find-class 'quicksearch-id-direct-slot)
       (call-next-method)))

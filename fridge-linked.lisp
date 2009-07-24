@@ -107,7 +107,7 @@
     (when (slot-boundp object slot-name)
       (quickrm object slot-name))))
 
-(define-condition object-missing-id (error)
+(define-condition object-missing-id (warning)
   ((comment :initarg :comment))
   (:documentation "Signaled when the id of an object could not be found"))
 
@@ -159,7 +159,7 @@
     (unless (and (slot-boundp object id-slot-name)
 		 (slot-value object id-slot-name)
 		 (not (eql (slot-value object id-slot-name) :null)))
-      (error 'object-missing-id :comment "Can't assign to an unsaved object"))))
+      (warn 'object-missing-id :comment "Can't assign to an unsaved object"))))
 (defmethod (setf slot-value-using-class) :around (value (class linkable-metaclass) object (slot obediant-effective-slot-many))
   (let ((slot (direct-slot slot)))
     (let ((current-values (slot-value object (slot-name slot))))
@@ -180,9 +180,10 @@
       (delete-instance current-object))
     (setf (slot-value new-object (internal-slot slot)) (id object))))
 (defmethod (setf slot-value-using-class) (value (class linkable-metaclass) object (slot master-effective-slot))
-  (unless (id value)
-    (error 'object-missing-id :comment "Can't assign an unsaved object"))
-  (let ((slot (direct-slot slot))) (setf (slot-value object (internal-slot slot)) (id value))))
+  (unless (eql value :null)
+    (if (id value)
+	(let ((slot (direct-slot slot))) (setf (slot-value object (internal-slot slot)) (id value)))
+	(warn 'object-missing-id :comment "Can't assign an unsaved object"))))
 
 (defmethod slot-value-using-class ((class linkable-metaclass) object (slot obediant-effective-slot-one))
   (let ((slot (direct-slot slot)))
@@ -199,4 +200,3 @@
   (let ((slot (direct-slot slot)))
     (when (slot-boundp object (internal-slot slot))
       (load-instance-from-slot (external-class slot) (id-slot-name (external-class slot)) (slot-value object (internal-slot slot))))))
-
