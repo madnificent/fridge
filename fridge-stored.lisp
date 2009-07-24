@@ -31,6 +31,15 @@
 (defgeneric id (object)
   (:documentation "Returns the id of the given object"))
 
+(defgeneric find-or-create-instance (class &optional get set)
+  (:documentation "Tries to load an instance form the initargs from the given get and returns this object. Iff no object could be found, a new object is created from the arguments given in the get and the set key (concatenated)."))
+
+(defmethod find-or-create-instance ((class symbol) &optional get set)
+  (find-or-create-instance (find-class class) get set))
+(defmethod find-or-create-instance ((class quicksearch-support-metaclass) &optional get set)
+  (or (apply #'load-instance class get)
+      (apply #'make-instance class (concatenate 'list get set))))
+
 (defparameter *known-objects* (make-hash-table :test 'equal)
   "Hash that will store the known objects by their class and id")
 
@@ -149,10 +158,11 @@
   (let ((hash (cond ((and key-p value-p) (build-hash-identifier object key value))
 		    (key-p (build-hash-identifier object key))
 		    (T (build-hash-id object)))))
-    (if (eql (hash-identifier-slot hash)
-	     (id-slot-name object))
-	(setf (gethash hash *known-objects*) (list object))
-	(setf (gethash hash *known-objects*) (cons object (gethash hash *known-objects*))))))
+    (first 
+     (if (eql (hash-identifier-slot hash)
+	      (id-slot-name object))
+	 (setf (gethash hash *known-objects*) (list object))
+	 (setf (gethash hash *known-objects*) (cons object (gethash hash *known-objects*)))))))
 (defmethod quickstore-again ((object quicksearch-support-class))
   (quickstore object))
 (defmethod quickfetch (identifier)
@@ -171,6 +181,9 @@
   (quickstore object))
 
 ;;; fetching thecorrect slots
+(defmethod object-matches-initargs (object initargs)
+  (declare (ignore object initargs))
+  nil)
 (defmethod object-matches-initargs ((object quicksearch-support-class) initargs)
   (loop for (key value) on initargs by #'cddr
      unless (equal value (slot-value object (slot-name (find-slot-by-initarg (class-of object) key))))
@@ -182,8 +195,8 @@
      do (return-from object-matches-columns nil))
   object)
 (defmethod load-instance :around ((class quicksearch-support-metaclass) &rest initargs &key id &allow-other-keys)
-  (declare (ignore initargs))
-  (or (and id (object-matches-initargs (quickfetch (build-hash-id class id))))
+  (or (and id (object-matches-initargs (quickfetch (build-hash-id class id))
+				       initargs))
       (quickstore (call-next-method))))
 
 (defmethod load-instance-from-column-alist :around ((class quicksearch-support-metaclass) &rest column-alist)

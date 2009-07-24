@@ -2,6 +2,7 @@
   (:use :common-lisp :postmodern :closer-mop :versioned-objects :validations)
   (:export :load-instance
 	   :load-instances
+	   :find-or-create-instance
 	   :save :save-objects :save-quickstore
 	   :delete-instance
 	   :db=
@@ -255,7 +256,7 @@ eg: (defclass user ()
   (apply #'set-slots-from-column-alist class (make-instance class) column-alist))
 
 (defmethod load-instance ((class symbol) &rest initargs)
-  (first (apply #'load-instances class initargs)))
+  (apply #'load-instance (find-class class) initargs))
 (defmethod load-instance ((class db-support-metaclass) &rest initargs)
   (first (apply #'load-instances class initargs)))
 
