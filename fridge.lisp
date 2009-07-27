@@ -120,6 +120,9 @@ eg: (defclass user ()
       (find-class 'column-direct-slot)
       (call-next-method)))
 
+(defmethod database-table ((class symbol))
+  (database-table (find-class class)))
+
 ;; begin effective-slot-definition-hacks
 (defparameter *direct-slots* nil "Postmodern trick to send the direct slots to the effective-slot-definition-class method")
 (defgeneric initialize-extra-info (slot args)

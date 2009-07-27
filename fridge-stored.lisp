@@ -34,12 +34,6 @@
 (defgeneric find-or-create-instance (class &optional get set)
   (:documentation "Tries to load an instance form the initargs from the given get and returns this object. Iff no object could be found, a new object is created from the arguments given in the get and the set key (concatenated)."))
 
-(defmethod find-or-create-instance ((class symbol) &optional get set)
-  (find-or-create-instance (find-class class) get set))
-(defmethod find-or-create-instance ((class quicksearch-support-metaclass) &optional get set)
-  (or (apply #'load-instance class get)
-      (apply #'make-instance class (concatenate 'list get set))))
-
 (defparameter *known-objects* (make-hash-table :test 'equal)
   "Hash that will store the known objects by their class and id")
 
@@ -73,6 +67,15 @@
   (:documentation "Quicksearch direct slot for the ID of the current object"))
 (defclass quicksearch-id-effective-slot (direct-effective-slot)
   () (:documentation "Quicksearch effective slot for the ID of the current object"))
+
+(defun get-next-id (class)
+  (first (first (postmodern:query (:raw (format nil "select nextval(pg_get_serial_sequence('~A','~A'));" (s-sql:to-sql-name (database-table class)) (s-sql:to-sql-name (column (id-slot class)))))))))
+
+(defmethod initialize-instance :after ((object quicksearch-support-class) &key &allow-other-keys)
+  (unless (and (slot-boundp object (id-slot-name object))
+	       (slot-value object (id-slot-name object)))
+    (setf (slot-value object (id-slot-name object))
+	  (get-next-id (class-of object)))))
 
 (defmethod id-slot ((class symbol))
   (id-slot (find-class class)))
@@ -162,7 +165,8 @@
      (if (eql (hash-identifier-slot hash)
 	      (id-slot-name object))
 	 (setf (gethash hash *known-objects*) (list object))
-	 (setf (gethash hash *known-objects*) (cons object (gethash hash *known-objects*)))))))
+	 (setf (gethash hash *known-objects*) (cons object (gethash hash *known-objects*)))))
+    object))
 (defmethod quickstore-again ((object quicksearch-support-class))
   (quickstore object))
 (defmethod quickfetch (identifier)
@@ -180,6 +184,13 @@
 (defmethod save :after ((object quicksearch-support-class))
   (quickstore object))
 
+(defmethod find-or-create-instance ((class symbol) &optional get set)
+  (find-or-create-instance (find-class class) get set))
+(defmethod find-or-create-instance ((class quicksearch-support-metaclass) &optional get set)
+  (let ((loaded (apply #'load-instance class get)))
+    (or loaded
+	(apply #'make-instance class (concatenate 'list get set)))))
+
 ;;; fetching thecorrect slots
 (defmethod object-matches-initargs (object initargs)
   (declare (ignore object initargs))
@@ -195,9 +206,12 @@
      do (return-from object-matches-columns nil))
   object)
 (defmethod load-instance :around ((class quicksearch-support-metaclass) &rest initargs &key id &allow-other-keys)
-  (or (and id (object-matches-initargs (quickfetch (build-hash-id class id))
-				       initargs))
-      (quickstore (call-next-method))))
+  (let ((quick-found-object (and id 
+				 (object-matches-initargs (quickfetch (build-hash-id class id))
+						      initargs))))
+    (or quick-found-object
+	(let ((object (call-next-method)))
+	  (when object (quickstore object))))))
 
 (defmethod load-instance-from-column-alist :around ((class quicksearch-support-metaclass) &rest column-alist)
   (let ((column (find-column-by-slot class (id-slot-name class))))
@@ -205,25 +219,24 @@
 			   (quickfetch (build-hash-id class (cdr (assoc column column-alist)))))))
       (or fetched-value (call-next-method)))))
 
+(defmethod object-matches-slots-p ((object quicksearch-support-class) &rest slots-and-values)
+  (loop for (slot value) on slots-and-values by #'cddr
+     when (not (equal value (slot-value object slot)))
+     do (return-from object-matches-slots-p nil))
+  T)
+
 (defmethod load-instances :around ((class quicksearch-support-metaclass) &rest initargs)
-  (remove-if (lambda (object)
-	       (block object-validator
-		 (loop for (column value) on initargs by #'cddr
-		    when (not (equal value
-				     (slot-value object (slot-name (find-slot-by-column class column)))))
-		    do (return-from object-validator T)))
-	       nil)
-	     (call-next-method)))
+  (let ((initslots (loop for (initarg value) on initargs by #'cddr append (list (slot-name (find-slot-by-initarg class initarg)) value)))
+	(found-instances (call-next-method)))
+    (remove-if-not (lambda (object)
+		     (apply #'object-matches-slots-p object initslots))
+		   found-instances)))
 
 ;;; loading of instances by cached slots
 (defmethod load-instances-by-slot-names :around ((class quicksearch-support-metaclass) &rest initargs)
-  (remove-if (lambda (object)
-	       (block object-validator
-		 (loop for (slot value) on initargs by #'cddr
-		    when (not (equal value (slot-value object slot)))
-		    do (return-from object-validator T)))
-	       nil)
-	     (call-next-method)))
+  (remove-if-not (lambda (object)
+		   (apply #'object-matches-slots-p object initargs))
+		 (call-next-method)))
 
 (defmethod load-instance-from-slot ((class symbol) slot value)
   (load-instance-from-slot (find-class class) slot value))
