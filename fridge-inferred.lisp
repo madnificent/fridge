@@ -25,10 +25,13 @@
   
 (defun build-accompanying-linked-slot (class-name slot-definition direct-slots package)
   (declare (ignore class-name))
-  (let* ((name (intern (format nil "~A"
-			       (s-sql:from-sql-name (elt (second (multiple-value-list (cl-ppcre:scan-to-strings "(.*)_ids?"
-															 (s-sql:to-sql-name (getf slot-definition :column)))))
-							 0)))
+  (let* ((name (intern (format nil "~A" (s-sql:from-sql-name
+					 (elt (second 
+					       (multiple-value-list 
+						(cl-ppcre:scan-to-strings 
+						 "(.*)_ids?"
+						 (s-sql:to-sql-name (getf slot-definition :column)))))
+					      0)))
 		       package))
 	 (accompanying-slot (or (find-if (lambda (direct-slot) (eql (getf direct-slot :internal-slot) (getf slot-definition :name)))
 					 direct-slots)
@@ -46,19 +49,12 @@
     (let ((statements (list :name name 
 			    :column column 
 			    :initargs (list column)
-			    :readers (list column)
-			    :writers (list (list 'setf column)))))
-      (let ((result
-	     (if (cl-ppcre:scan "_ids?$" (s-sql:to-sql-name column))
-		 (let ((current-slot-definition (concatenate 'list statements
-							     (list :id T))))
-		   (list current-slot-definition
-			 (build-accompanying-linked-slot class-name current-slot-definition direct-slots package)))
-		 (list (concatenate 'list statements
-				    (list :readers (list name)
-					  :writers (list (list 'setf name))
-					  :initargs (list column)))))))
-	result))))
+			    :readers (list name)
+			    :writers (list (list 'setf name)))))
+      (if (cl-ppcre:scan "_ids?$" (s-sql:to-sql-name column))
+	  (let ((current (concatenate 'list statements (list :id T))))
+	    (list current (build-accompanying-linked-slot class-name current direct-slots package)))
+	  (list statements)))))
 
 (defun build-linked-slot-description (table table-description name direct-slots package)
   (let ((my-single-link-name (concatenate 'string (s-sql:to-sql-name name) "_id"))
@@ -97,7 +93,7 @@
 			     (create-slot-definition name column direct-slots package)))))
 	  (loop for slot-definition in direct-slots
 	     for column = (getf slot-definition :column)
-	     when (and (column (not (find column updated-slot-definitions :key (lambda (slot-definition) (getf slot-definition :column))))))
+	     when (and column (not (find column updated-slot-definitions :key (lambda (slot-definition) (getf slot-definition :column)))))
 	     do (push slot-definition updated-slot-definitions))
 	  (loop for table in (list-tables nil)
 	     for table-description = (table-description table)

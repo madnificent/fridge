@@ -142,8 +142,8 @@ eg: (defclass user ()
 	 (find-class 'direct-effective-slot))
 	(T
 	 (call-next-method))))
-;; end effective-slot-definition-hacks
 
+;; end effective-slot-definition-hacks
 (defmethod db-backed-slot-p (class slot)
   (declare (ignore class slot))
   nil)
