@@ -248,3 +248,10 @@
   (let ((fetched (quickfetch-all (build-hash-identifier class slot value)))
 	(loaded (load-instances-by-slot-names class slot value)))
     (remove-duplicates (concatenate 'list fetched loaded) :key #'id)))
+
+;; support for multithreading
+(defmacro with-quickstore (&body body)
+  `(let ((*known-objects* nil))
+     (declare (special *known-objects*))
+     (quickclear)
+     ,@body))

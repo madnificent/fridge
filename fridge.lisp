@@ -8,7 +8,8 @@
 	   :db=
 	   :quickclear
 	   :quickstore-again
-	   :dbi-class :dbi-metaclass))
+	   :dbi-class :dbi-metaclass
+	   :with-quickstore))
 
 (defpackage :fridge-user
   (:use :common-lisp :fridge))
