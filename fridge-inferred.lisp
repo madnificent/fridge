@@ -10,6 +10,14 @@
   (:metaclass dbi-metaclass)
   (:documentation "This class is supposed to be used with the dbi-metaclass"))
 
+(defmethod slot-value-using-class :around ((class dbi-metaclass) (object dbi-class) (slot quicksearch-id-effective-slot))
+  (let ((slot-name (slot-name (direct-slot slot))))
+    (or (and (slot-boundp object slot-name) (call-next-method))
+	(progn (setf (slot-value object slot-name) (query (:raw (format nil "select nextval(pg_get_serial_sequence('~A','~A'));"
+									(s-sql:to-sql-name (database-table class))
+									(s-sql:to-sql-name (column (direct-slot slot)))))
+							  :single))))))
+
 (defmacro add-unless-existant (place getter value)
   "Simple macro to skip typing when assigning to plists"
   `(unless (getf ,place ,getter)

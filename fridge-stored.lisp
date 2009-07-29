@@ -110,8 +110,9 @@
 (defmethod slot-value-using-class :around ((class quicksearch-support-metaclass) (object quicksearch-support-class) (slot quicksearch-id-effective-slot))
   (let ((slot-name (slot-name (direct-slot slot)))) 
     (or (and (slot-boundp object slot-name) (call-next-method))
-       (progn (save object)
-	      (slot-value object slot-name)))))
+	(progn (save object) ;; TODO me must be here
+	       (slot-value object slot-name)))))
+
 (defmethod (setf slot-value-using-class) :around (value (class quicksearch-support-metaclass) (object quicksearch-support-class) (slot quicksearch-id-effective-slot))
   (when (slot-boundp-using-class class object slot)
     (quickrm object))
