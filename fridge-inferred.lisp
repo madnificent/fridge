@@ -45,7 +45,7 @@
 					 direct-slots)
 				(list :name name))))
     (add-unless-existant accompanying-slot :external-class name)
-    (add-unless-existant accompanying-slot :internal-slot (getf slot-definition :name))
+    (add-unless-existant accompanying-slot :slot (getf slot-definition :name))           ;;
     (add-unless-existant accompanying-slot :readers (list name))
     (add-unless-existant accompanying-slot :writers (list (list 'setf name)))
     (add-unless-existant accompanying-slot :initargs (list (getf slot-definition :column)))

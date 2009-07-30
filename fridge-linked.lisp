@@ -33,16 +33,14 @@
   (:documentation "see linked-direct-slot"))
 
 (defclass linked-direct-slot-one (linked-direct-slot)
-  ((external-class :accessor external-class)
-   (internal-slot :accessor internal-slot))
+  ()
   (:documentation "A linked direct slot has a link to an object, which is identified through its ID"))
 (defclass linked-effective-slot-one (direct-effective-slot)
   ()
   (:documentation "see linked-direct-slot"))
 
 (defclass linked-direct-slot-many (linked-direct-slot)
-  ((external-class :accessor external-class)
-   (internal-slot :accessor internal-slot))
+  ()
   (:documentation "A linked direct slot has a link to an object, which is identified through its ID"))
 (defclass linked-effective-slot-many (direct-effective-slot)
   ()
