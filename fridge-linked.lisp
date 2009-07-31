@@ -7,6 +7,15 @@
 (defgeneric linked-slot-change (class object slot changed-slot new-value)
   (:documentation "This method is called for each slot before the slot's value is updated"))
 
+(defgeneric complete-ring (object &rest objects)
+  (:documentation "Loads all objects the given object is linked to and adds it to objects.  You are really only allowed to set the first object, the &rest is to force the fact that you have handled those objects yourself (and they will be returned too)."))
+(defgeneric complete-ring-with-slot (object slot &rest objects)
+  (:documentation "Loads all objects the given slot links to through the given object and adds it to objects."))
+(defgeneric complete-stored-ring (object &rest objects)
+  (:documentation "Completes an object ring, but never loads a new object, only searches through the quickstore"))
+(defgeneric complete-stored-ring-with-slot (object slot &rest objects)
+  (:documentation "Completes a list of objects through the slot of (class-of object), only through results it can find in the quickstore"))
+
 (defclass linkable-column-direct-slot (column-direct-slot) ()
   (:documentation "Direct slot used for a column slot which may be used in a link (can be used for reverse links too)"))
 (defclass linkable-column-effective-slot (direct-effective-slot) ()
@@ -199,3 +208,56 @@
   (let ((slot (direct-slot slot)))
     (when (slot-boundp object (internal-slot slot))
       (load-instance-from-slot (external-class slot) (id-slot-name (external-class slot)) (slot-value object (internal-slot slot))))))
+
+;; object-ring
+
+
+(defmethod complete-ring (object &rest objects)
+  (declare (ignore object))
+  objects)
+(defmethod complete-ring ((object linkable-class) &rest objects)
+  (if (find object objects)
+      objects
+      (let ((objectss (cons object objects)))
+	(loop for slot in (class-direct-slots (class-of object))
+	   do (setf objectss (apply #'complete-ring-with-slot object slot objectss)))
+	objectss)))
+
+(defmethod complete-ring-with-slot (object slot &rest objects)
+  (declare (ignore object slot))
+  objects)
+(defmethod complete-ring-with-slot ((object linkable-class) (slot linked-direct-slot-one) &rest objects)
+  (let ((value (slot-value object (slot-name slot))))
+    (if value
+	(apply #'complete-ring value objects)
+	objects)))
+(defmethod complete-ring-with-slot ((object linkable-class) (slot linked-direct-slot-many) &rest objects)
+  (let ((values (slot-value object (slot-name slot))))
+    (loop for value in values
+       do (setf objects (apply #'complete-ring value objects))))
+  objects)
+
+(defmethod complete-stored-ring (object &rest objects)
+  (declare (ignore object))
+  objects)
+(defmethod complete-stored-ring ((object linkable-class) &rest objects)
+  (if (find object objects)
+      objects
+      (let ((objectss (cons object objects)))
+	(loop for slot in (class-direct-slots (class-of object))
+	   do (setf objectss (apply #'complete-stored-ring-with-slot object slot objectss)))
+	objectss)))
+
+(defmethod complete-stored-ring-with-slot (object slot &rest objects)
+  (declare (ignore object slot))
+  objects)
+(defmethod complete-stored-ring-with-slot ((object linkable-class) (slot master-direct-slot) &rest objects)
+  (let ((value (quickfetch (build-hash-id (external-class slot) (slot-value object (internal-slot slot))))))
+    (if value
+	(apply #'complete-stored-ring value objects)
+	objects)))
+(defmethod complete-stored-ring-with-slot ((object linkable-class) (slot obediant-direct-slot) &rest objects)
+  (let ((values (quickfetch-all (build-hash-identifier (external-class slot) (internal-slot slot) (id object)))))
+    (loop for value in values
+       do (setf objects (apply #'complete-stored-ring value objects)))
+    objects))

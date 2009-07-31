@@ -9,7 +9,9 @@
 	   :quickclear
 	   :quickstore-again
 	   :dbi-class :dbi-metaclass
-	   :with-quickstore))
+	   :with-quickstore
+	   :complete-ring
+	   :complete-stored-ring))
 
 (defpackage :fridge-user
   (:use :common-lisp :fridge))
@@ -351,3 +353,4 @@ eg: (defclass user ()
     (if invalid-objects
 	invalid-objects
 	(loop for object in objects do (save object)))))
+
