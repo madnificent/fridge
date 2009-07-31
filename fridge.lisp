@@ -353,4 +353,3 @@ eg: (defclass user ()
     (if invalid-objects
 	invalid-objects
 	(loop for object in objects do (save object)))))
-
