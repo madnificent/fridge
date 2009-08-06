@@ -226,7 +226,9 @@
      do (return-from object-matches-slots-p nil))
   T)
 
-(defmethod load-instances :around ((class quicksearch-support-metaclass) &rest initargs)
+(defmethod load-instances :around ((class quicksearch-support-metaclass) &rest initargs &key s-sql-rewriter)
+  (when s-sql-rewriter
+    (setf initargs (cddr initargs)))
   (let ((initslots (loop for (initarg value) on initargs by #'cddr append (list (slot-name (find-slot-by-initarg class initarg)) value)))
 	(found-instances (call-next-method)))
     (remove-if-not (lambda (object)

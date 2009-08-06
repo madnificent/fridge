@@ -26,7 +26,7 @@
 The order in which the objects are loaded is unspecified."))
 (defgeneric reload-instance (object)
   (:documentation "Reloads the instance from the database.  This can help in setting the ids of certain objects"))
-(defgeneric load-instances (class &key &allow-other-keys)
+(defgeneric load-instances (class &key s-sql-rewriter &allow-other-keys)
   (:documentation "Loads a series of objects matching the given initargs, their superclasses and their subclasses from the database.
 The order in which the objects are loaded internally and externally, is unspecified.
 If no objects in the database match the initargs, the empty list is returned."))
@@ -218,8 +218,8 @@ eg: (defclass user ()
    (query :initarg :query :reader db-query))
   (:documentation "This error is thrown when a certain record could not be found.  This can happen whilst trying to load a certain instance."))
 
-(defun get-query-alist (query)
-  (let ((query-result (query (sql-compile query) :alists)))
+(defun get-query-alist (query &optional (rewriter (lambda (query) query)))
+  (let ((query-result (query (sql-compile (funcall rewriter query)) :alists)))
     (restart-case (unless query-result
 		    (error 'record-not-found-error :query query))
        (provide-alist (alist) (return-from get-query-alist alist))
@@ -268,10 +268,12 @@ eg: (defclass user ()
 
 (defmethod load-instances ((class symbol) &rest initargs)
   (apply #'load-instances (find-class class) initargs))
-(defmethod load-instances ((class db-support-metaclass) &rest initargs)
+(defmethod load-instances ((class db-support-metaclass) &rest initargs &key (s-sql-rewriter (lambda (x) x) s-sql-rewriter-p))
+  (when s-sql-rewriter-p
+    (setf initargs (cddr initargs)))
   (let* ((where-clause (apply #'and-query-from-initargs class initargs))
 	 (complete-query `(:select '* :from ,(database-table class) ,@(when where-clause `(:where ,where-clause)))))
-    (handler-case (loop for alist in (get-query-alist complete-query)
+    (handler-case (loop for alist in (get-query-alist complete-query s-sql-rewriter)
 		     collect (apply #'load-instance-from-column-alist class alist))
       (record-not-found-error () nil))))
 (defmethod load-instances-by-slot-names ((class symbol) &rest initargs)
