@@ -108,6 +108,11 @@
 	     for slot-description = (build-linked-slot-description table table-description name direct-slots package)
 	     when slot-description
 	     do (push slot-description updated-slot-definitions))
+	  (loop for slot-definition in direct-slots
+	     do (unless (find (getf slot-definition :name)
+			      updated-slot-definitions
+			      :key (lambda (x) (getf x :name)))
+		  (push slot-definition updated-slot-definitions)))
 	  (let ((new-args (concatenate 'list (loop for (key value) on args by #'cddr
 						append (cond ((eql key :table)
 							      nil)
