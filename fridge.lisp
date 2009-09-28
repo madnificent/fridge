@@ -11,7 +11,10 @@
 	   :dbi-class :dbi-metaclass
 	   :with-quickstore
 	   :complete-ring
-	   :complete-stored-ring))
+	   :complete-stored-ring
+	   :*auto-connection*
+	   :*connection-settings*
+	   :with-ensured-connection))
 
 (defpackage :fridge-user
   (:use :common-lisp :fridge))
@@ -20,6 +23,8 @@
 (declaim (optimize (speed 0) (safety 3) (debug 3)))
 
 (defconstant +db-snapshot+ '+db-snapshot+ "Snapshot of the state of the object in the database")
+(defparameter *auto-connection* T "Set this to nil if you want to setup the connections yourself.  Fridge itself may alter this variable after ensuring a database connection is available for it.")
+(defparameter *connection-settings* nil "Set this to the parameters of the database connection")
 
 (defgeneric load-instance (class &key &allow-other-keys)
   (:documentation "Loads an object, its superclasses and its subclasses from the database.
@@ -78,6 +83,17 @@ If no objects in the database match the initargs, the empty list is returned."))
 (defgeneric and-query-from-initslots (class &rest initslots)
   (:documentation "Creates an and-query from the slots and the values they should have"))
 
+(defmacro with-ensured-connection (&body body)
+  "This macro ensures you have a valid database database connection"
+  (let ((functor-symbol (gensym)))
+   `(let ((,functor-symbol (lambda () ,@body)))
+      (if *auto-connection*
+	  (let ((*auto-connection* nil))
+	    (when (not *connection-settings*)
+	      (error "I don't know how to use the database, please configure the connection settings.  These must be set in ~A." '*connection-settings*))
+	    (call-with-connection *connection-settings*
+				  ,functor-symbol))
+	  (funcall ,functor-symbol)))))
 
 (defclass db-support-metaclass (standard-class)
   ((database-table :initarg :database-table
@@ -219,7 +235,9 @@ eg: (defclass user ()
   (:documentation "This error is thrown when a certain record could not be found.  This can happen whilst trying to load a certain instance."))
 
 (defun get-query-alist (query &optional (rewriter (lambda (query) query)))
-  (let ((query-result (query (sql-compile (funcall rewriter query)) :alists)))
+  (let ((query-result 
+	 (with-ensured-connection ;; this with-ensured-connection is the fallback for many systems.  It does cause a speed penalty though.
+	   (query (sql-compile (funcall rewriter query)) :alists))))
     (restart-case (unless query-result
 		    (error 'record-not-found-error :query query))
        (provide-alist (alist) (return-from get-query-alist alist))
@@ -264,7 +282,7 @@ eg: (defclass user ()
 (defmethod load-instance ((class symbol) &rest initargs)
   (apply #'load-instance (find-class class) initargs))
 (defmethod load-instance ((class db-support-metaclass) &rest initargs)
-  (first (apply #'load-instances class initargs)))
+  (with-ensured-connection (first (apply #'load-instances class initargs))))
 
 (defmethod load-instances ((class symbol) &rest initargs)
   (apply #'load-instances (find-class class) initargs))
@@ -273,8 +291,9 @@ eg: (defclass user ()
     (setf initargs (cddr initargs)))
   (let* ((where-clause (apply #'and-query-from-initargs class initargs))
 	 (complete-query `(:select '* :from ,(database-table class) ,@(when where-clause `(:where ,where-clause)))))
-    (handler-case (loop for alist in (get-query-alist complete-query s-sql-rewriter)
-		     collect (apply #'load-instance-from-column-alist class alist))
+    (handler-case (with-ensured-connection 
+		    (loop for alist in (get-query-alist complete-query s-sql-rewriter)
+		       collect (apply #'load-instance-from-column-alist class alist)))
       (record-not-found-error () nil))))
 (defmethod load-instances-by-slot-names ((class symbol) &rest initargs)
   (apply #'load-instances-by-slot-names (find-class class) initargs))
@@ -310,17 +329,18 @@ eg: (defclass user ()
   (unless (and (object-in-database-p object)
 	       (object-up-to-date-p object))
     ;; we need to save our inner class
-    (flet ((update-database (object set &optional where)
-	     (apply #'set-slots-from-column-alist
-		    (class-of object) object 
-		    (first
-		     (if where
-			 (query (sql-compile `(:update ,(database-table (class-of object)) :set ,@set :where ,where :returning '*)) :alists)
-			 (query (sql-compile `(:insert-into ,(database-table (class-of object)) :set ,@set :returning '*)) :alists))))))
-      (cond ((and (object-in-database-p object) (not (object-up-to-date-p object)))
-	     (update-database object (set-clause object) (where-clause object)))
-	    ((not (object-in-database-p object))
-	     (update-database object (set-clause object)))))
+    (with-ensured-connection
+      (flet ((update-database (object set &optional where)
+	       (apply #'set-slots-from-column-alist
+		      (class-of object) object 
+		      (first
+		       (if where
+			   (query (sql-compile `(:update ,(database-table (class-of object)) :set ,@set :where ,where :returning '*)) :alists)
+			   (query (sql-compile `(:insert-into ,(database-table (class-of object)) :set ,@set :returning '*)) :alists))))))
+	(cond ((and (object-in-database-p object) (not (object-up-to-date-p object)))
+	       (update-database object (set-clause object) (where-clause object)))
+	      ((not (object-in-database-p object))
+	       (update-database object (set-clause object))))))
     (snapshot object +db-snapshot+)))
 
 (defmethod delete-instance (ignored)
@@ -328,7 +348,7 @@ eg: (defclass user ()
 (defmethod delete-instance ((object db-support-class))
   (let* ((query `(:delete-from ,(database-table (class-of object)) :where ,(where-clause object))))
     (multiple-value-bind (unimportant updated-rows)
-	(query (sql-compile query))
+	(with-ensured-connection (query (sql-compile query)))
       (declare (ignore unimportant))
       (restart-case (progn 
 		      (unless (> updated-rows 0)
@@ -342,7 +362,8 @@ eg: (defclass user ()
 
 (defmethod reload-instance ((object db-support-class))
   (let ((class (class-of object)))
-    (set-slots-from-column-alist class object (query (sql-compile `(:select * :from ,(database-table class) :where ,(where-clause object))))))
+    (with-ensured-connection
+      (set-slots-from-column-alist class object (query (sql-compile `(:select * :from ,(database-table class) :where ,(where-clause object)))))))
   object)
 
 (defmethod can-save-object-in-list-p (a b)
@@ -354,4 +375,5 @@ eg: (defclass user ()
   (let ((invalid-objects (loop for object in objects unless (can-save-object-in-list-p object objects) collect object)))
     (if invalid-objects
 	invalid-objects
-	(loop for object in objects do (save object)))))
+	(with-ensured-connection
+	  (loop for object in objects do (save object))))))

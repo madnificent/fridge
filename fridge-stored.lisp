@@ -69,7 +69,7 @@
   () (:documentation "Quicksearch effective slot for the ID of the current object"))
 
 (defun get-next-id (class)
-  (first (first (postmodern:query (:raw (format nil "select nextval(pg_get_serial_sequence('~A','~A'));" (s-sql:to-sql-name (database-table class)) (s-sql:to-sql-name (column (id-slot class)))))))))
+  (first (first (with-ensured-connection (postmodern:query (:raw (format nil "select nextval(pg_get_serial_sequence('~A','~A'));" (s-sql:to-sql-name (database-table class)) (s-sql:to-sql-name (column (id-slot class))))))))))
 
 (defmethod initialize-instance :after ((object quicksearch-support-class) &key &allow-other-keys)
   (unless (and (slot-boundp object (id-slot-name object))
@@ -255,6 +255,5 @@
 ;; support for multithreading
 (defmacro with-quickstore (&body body)
   `(let ((*known-objects* nil))
-     (declare (special *known-objects*))
      (quickclear)
      ,@body))

@@ -13,10 +13,11 @@
 (defmethod slot-value-using-class :around ((class dbi-metaclass) (object dbi-class) (slot quicksearch-id-effective-slot))
   (let ((slot-name (slot-name (direct-slot slot))))
     (or (and (slot-boundp object slot-name) (call-next-method))
-	(progn (setf (slot-value object slot-name) (query (:raw (format nil "select nextval(pg_get_serial_sequence('~A','~A'));"
-									(s-sql:to-sql-name (database-table class))
-									(s-sql:to-sql-name (column (direct-slot slot)))))
-							  :single))))))
+	(progn (setf (slot-value object slot-name) (with-ensured-connection
+						     (query (:raw (format nil "select nextval(pg_get_serial_sequence('~A','~A'));"
+									  (s-sql:to-sql-name (database-table class))
+									  (s-sql:to-sql-name (column (direct-slot slot)))))
+							    :single)))))))
 
 (defmacro add-unless-existant (place getter value)
   "Simple macro to skip typing when assigning to plists"
@@ -86,45 +87,46 @@
       new-slot-definition)))
 
 (defmethod shared-initialize :around ((dsm dbi-metaclass) slot-names &rest args &key package name table direct-slots &allow-other-keys)
-  (let* ((package (or (symbol-package  (first package)) (symbol-package name)))
-	 (name (or name (class-name dsm)))
-	 (table (or (first table) (intern (format nil "~A" name) (symbol-package :table)))))
-    (format T "~&oh, we've set the table to ~A~%" table)
-    (format T "we saw ~A pass by as the name of the class~%" name)
-    (format T "before I forget to tell you, everything will be interned in ~A~%" package)
-    (if (table-description table)
-	(let ((updated-slot-definitions
-	       (loop for column in (map 'list (lambda (description) (s-sql:from-sql-name (first description))) (table-description table))
-		  for slot-definition = (find column direct-slots :key (lambda (direct-slot) (getf direct-slot :column)))
-		  append (if slot-definition
-			     (complete-slot-definition name column slot-definition direct-slots package)
-			     (create-slot-definition name column direct-slots package)))))
-	  (loop for slot-definition in direct-slots
-	     for column = (getf slot-definition :column)
-	     when (and column (not (find column updated-slot-definitions :key (lambda (slot-definition) (getf slot-definition :column)))))
-	     do (push slot-definition updated-slot-definitions))
-	  (loop for table in (list-tables nil)
-	     for table-description = (table-description table)
-	     for slot-description = (build-linked-slot-description table table-description name direct-slots package)
-	     when slot-description
-	     do (push slot-description updated-slot-definitions))
-	  (loop for slot-definition in direct-slots
-	     do (unless (find (getf slot-definition :name)
-			      updated-slot-definitions
-			      :key (lambda (x) (getf x :name)))
-		  (push slot-definition updated-slot-definitions)))
-	  (let ((new-args (concatenate 'list (loop for (key value) on args by #'cddr
-						append (cond ((eql key :table)
-							      nil)
-							     ((eql key :direct-slots)
-							      (list :direct-slots updated-slot-definitions))
-							     (T (list key value))))
-				       (list :table (list table)))))
-	    (progn (format T "~&I've generated the following from the table:~%")
-		   (princ new-args T)
-		   (format T "~&You can extract the needed variables from there, if you'd need to tweak or debug~%"))
-	    (apply #'call-next-method dsm slot-names new-args)))
-	(call-next-method))))
+  (with-ensured-connection
+    (let* ((package (or (symbol-package  (first package)) (symbol-package name)))
+	   (name (or name (class-name dsm)))
+	   (table (or (first table) (intern (format nil "~A" name) (symbol-package :table)))))
+      (format T "~&oh, we've set the table to ~A~%" table)
+      (format T "we saw ~A pass by as the name of the class~%" name)
+      (format T "before I forget to tell you, everything will be interned in ~A~%" package)
+      (if (table-description table)
+	  (let ((updated-slot-definitions
+		 (loop for column in (map 'list (lambda (description) (s-sql:from-sql-name (first description))) (table-description table))
+		    for slot-definition = (find column direct-slots :key (lambda (direct-slot) (getf direct-slot :column)))
+		    append (if slot-definition
+			       (complete-slot-definition name column slot-definition direct-slots package)
+			       (create-slot-definition name column direct-slots package)))))
+	    (loop for slot-definition in direct-slots
+	       for column = (getf slot-definition :column)
+	       when (and column (not (find column updated-slot-definitions :key (lambda (slot-definition) (getf slot-definition :column)))))
+	       do (push slot-definition updated-slot-definitions))
+	    (loop for table in (list-tables nil)
+	       for table-description = (table-description table)
+	       for slot-description = (build-linked-slot-description table table-description name direct-slots package)
+	       when slot-description
+	       do (push slot-description updated-slot-definitions))
+	    (loop for slot-definition in direct-slots
+	       do (unless (find (getf slot-definition :name)
+				updated-slot-definitions
+				:key (lambda (x) (getf x :name)))
+		    (push slot-definition updated-slot-definitions)))
+	    (let ((new-args (concatenate 'list (loop for (key value) on args by #'cddr
+						  append (cond ((eql key :table)
+								nil)
+							       ((eql key :direct-slots)
+								(list :direct-slots updated-slot-definitions))
+							       (T (list key value))))
+					 (list :table (list table)))))
+	      (progn (format T "~&I've generated the following from the table:~%")
+		     (princ new-args T)
+		     (format T "~&You can extract the needed variables from there, if you'd need to tweak or debug~%"))
+	      (apply #'call-next-method dsm slot-names new-args)))
+	  (call-next-method)))))
 
 (defmethod save :around ((object dbi-class))
   (when (valid-p object)
