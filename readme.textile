@@ -80,15 +80,15 @@ When you use validations, objects will only store of teh requested section of ob
 You can use (save object) to store a single object.  This is the basic building block of saving.  As this method is fairly cumbersome to use, some helpers have been made to make your life easier:
 
 * save-quickstore : You use (save-quickstore) to save all elements in the quickstore (which contains all objects which you have loaded), this is roughly equivalent to all objects you accessed.
-* save-object-ring : ( *warning* this method is currently not supported ) You can use (save-object-ring object) which stores all objects a certain object links to, if you have modified only one object.  This ensures that you will not modify objects that are related to the given object but shouldn't have been touched (can be handy if you toyed around a bit too much).
+* save-objects: You can use (save-objects list-of-objects) to store all objects in the given list.
+* complete-ring:  You can use (complete-ring object) to get a list of all objects that link to, or are linked from the given object.  This can be used in combination with save-objects to save everything a certain object links to.  This will fetch *all* objects, you may be more interested in using complete-stored-ring with respect to saving.
+* complete-stored-ring: You can call (complete-stored-ring object) to get all the objects which link to, or are linked from the given object (and all those that link from there on (keep adding objects that are linked to/from until you can find no object that somehow links to object)) and which are stored in the quickstore.  This will not do database operations to fetch the classes which need to be linked to.
 
-It is assumed that you will use save-quickstore most.  If the object hasn't been changed internally (but only has been fetched to inspect its values), the quickstore will not query the database to store that certain object.
+It is assumed that you will use (save-objects (complete-stored-ring object)) most.  If the object hasn't been changed internally (but only has been fetched to inspect its values), the quickstore will not query the database to store that certain object.
 
 h1. Masters and obedients
 
 When you use the linking as specified above, there is a master and an obedient class at play.
 
 The obedient class has an extra slot, which links to the master's id.  In our previous example your-class-name was is the obedient class for both linked-class and other-linked-class.  This difference is used in a way to handle the storing and removal of objects.  When you disassign an object from a master class, that object will be removed from the database and it will be removed from the quickstore.  In order for the object to be saved (and updated) again when saving the quickstore, you must re-add it to the quickstore.  You can do this by calling (quickstore-again your-lost-object).  Or you can call save on it immediately.
-
-
 
