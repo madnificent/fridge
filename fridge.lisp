@@ -7,6 +7,7 @@
 	   :delete-instance
 	   :db=
 	   :quickclear
+	   :quickrm
 	   :quickstore-again
 	   :dbi-class :dbi-metaclass
 	   :with-quickstore
