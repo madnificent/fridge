@@ -1,5 +1,6 @@
 (defpackage :fridge
   (:use :common-lisp :postmodern :closer-mop :versioned-objects :validations)
+  (:shadowing-import-from :closer-mop :defmethod :standard-generic-function :defmethod :defgeneric :standard-generic-function)
   (:export :load-instance
 	   :load-instances
 	   :find-or-create-instance
